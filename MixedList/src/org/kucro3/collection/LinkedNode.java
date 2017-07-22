@@ -36,8 +36,6 @@ public abstract class LinkedNode<E> implements Sized, MetaCode {
 		return 1;
 	}
 	
-	protected E element;
-	
 	protected LinkedNode<E> prev;
 	
 	protected LinkedNode<E> next;
