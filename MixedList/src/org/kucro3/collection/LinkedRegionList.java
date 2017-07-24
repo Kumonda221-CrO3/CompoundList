@@ -18,7 +18,7 @@ public class LinkedRegionList<T> {
 		if(capacity < 3)
 			throw new IllegalArgumentException("Initializing capacity must be bigger than 2");
 		this.initCapacity = capacity;
-		this.head = new RegionNode(capacity);
+		this.tail = this.head = new RegionNode(capacity);
 	}
 	
 	public int getOption()
@@ -29,6 +29,11 @@ public class LinkedRegionList<T> {
 	public void setOption(int option)
 	{
 		this.option = option;
+	}
+	
+	public int size()
+	{
+		return size;
 	}
 	
 	public T get(int index)
@@ -43,7 +48,7 @@ public class LinkedRegionList<T> {
 	
 	public boolean add(T element)
 	{
-		LinkedNode<T> preoperating = this.tail;
+		LinkedNode preoperating = this.tail;
 		if(preoperating == null)
 			preoperating = this.head;
 		
@@ -59,6 +64,12 @@ public class LinkedRegionList<T> {
 		return true;
 	}
 	
+	public boolean add(int index, T element)
+	{
+		insert(index, element);
+		return true;
+	}
+	
 	public void insert(int index, T element)
 	{
 		FracturingResult result = fracture(index);
@@ -68,13 +79,55 @@ public class LinkedRegionList<T> {
 		size++;
 	}
 	
+	void redirect(int index, LocatingResult result)
+	{
+		int expected = expectedLocation(index);
+		if(expected == 0)
+			return;
+		
+		int current = result.nodeIndex;
+		
+		if(current > (expected << 6))
+		{
+			// merge
+			int ptr = result.base - 1;
+			Object[] newRef = new Object[result.base];
+			LinkedNode operating = result.result.prev;
+			
+			do {
+				int size = operating.size();
+				for(int i = 0; i < size; i++)
+					newRef[ptr--] = operating.get(size - i - 1);
+			} while((operating = operating.prev) != null);
+			
+			result.result.prev = null;
+			
+			RegionNode merged = new RegionNode();
+			merged.ptr = newRef.length;
+			merged.ref = newRef;
+			merged.start = 0;
+			merged.end = newRef.length - 1;
+			merged.size = merged.capacity();
+			merged.metacode |= METACODE_SIGNAL_FILLED;
+			merged.linkBefore(result.result);
+			this.head = merged;
+			
+			result.nodeIndex = 1;
+		}
+	}
 	
+	int expectedLocation(int index)
+	{
+		if(index < initCapacity)
+			return 0;
+		return (int) Math.ceil(Math.log((double)(index + 1) / (double)(initCapacity)) / GROWTH_LOG_CONSTANT);
+	}
 	
 	// [...] | [index, ...]
 	FracturingResult fracture(int index)
 	{
 		LocatingResult result = locate(index);
-		LinkedNode<T> operating = result.result;
+		LinkedNode operating = result.result;
 		
 		if(operating.size() == 1)
 			return new FracturingResult(operating, operating);
@@ -90,9 +143,11 @@ public class LinkedRegionList<T> {
 		second.end = first.end;
 		second.ref = first.ref;
 		second.ptr = first.ptr - ptr;
+		second.size = first.capacity() - ptr;
 		second.checkFilled();
 		second.linkAfter(first);
 		first.end = ptr - 1;
+		first.size = first.capacity();
 		
 		return new FracturingResult(first, second);
 	}
@@ -114,59 +169,34 @@ public class LinkedRegionList<T> {
 		operating.set(ptr, null);
 		
 		RegionNode branch;
-		if((this.option & OPTION_TIRM_ON_REMOVE) == 0)
+		if(ptr > 0)
 		{
-			if((ptr + 1) < operating.size())
+			if((ptr + 1) < operating.capacity())
 			{
 				branch = new RegionNode();
 				branch.ref = operating.ref;
 				branch.end = operating.end;
-				branch.start = ptr + 1;
+				branch.start = operating.start + ptr + 1;
 				branch.ptr = operating.ptr - ptr - 1;
+				branch.size = operating.capacity() - ptr - 1;
 				branch.checkFilled();
 				branch.linkAfter(operating);
 				operating.metacode |= METACODE_SIGNAL_FILLED;
 			}
-			operating.end = ptr - 1;
+			operating.end = operating.start + ptr - 1;
+			operating.size = operating.capacity();
 		}
 		else
 		{
-			if((ptr + 1) < operating.size())
-			{
-				Object[] oldRef = operating.ref;
-				Object[] newRef = new Object[ptr];
-				Object[] newBranchRef = new Object[operating.size() - ptr - 1];
-				
-				System.arraycopy(oldRef, 0, newRef, 0, newRef.length);
-				System.arraycopy(oldRef, ptr + 1, newBranchRef, 0, newBranchRef.length);
-				
-				branch = new RegionNode();
-				branch.end = newBranchRef.length - 1;
-				branch.ptr = operating.ptr - ptr - 1;
-				branch.checkFilled();
-				branch.linkAfter(operating);
-				branch.ref = newBranchRef;
-				
-				operating.ref = newRef;
-				operating.end = ptr - 1;
-				operating.metacode |= METACODE_SIGNAL_FILLED;
-				
-				this.capacity--;
-			}
-			else
-			{
-				operating.end--;
-				Object[] newRef = new Object[operating.ref.length - 1];
-				System.arraycopy(operating.ref, 0, newRef, 0, newRef.length);
-				operating.ref = newRef;
-			}
+			operating.start++;
+			operating.size--;
 		}
 		
 		size--;
 		return old;
 	}
 	
-	RegionNode grow(LinkedNode<T> operating)
+	RegionNode grow(LinkedNode operating)
 	{
 		RegionNode outcome = new RegionNode(
 				(option & OPTION_STATIC_GROWTH) == 0 ? this.capacity >> 1 : this.initCapacity
@@ -184,31 +214,37 @@ public class LinkedRegionList<T> {
 	
 	LocatingResult locate(int index)
 	{
-		LinkedNode<T> operating;
+		LinkedNode operating;
 		if(!(index < this.size))
 			throw new IndexOutOfBoundsException(index + " to size of " + this.size);
 		
 		operating = this.head;
 		
 		int counted = 0;
+		int nodeIndex = 0;
 		int size;
 		while(!(((size = operating.size()) + counted) > index))
 		{
 			counted += size;
 			operating = operating.next;
+			nodeIndex++;
 		}
 		
-		return new LocatingResult(operating, counted);
+		LocatingResult result = new LocatingResult(operating, counted, nodeIndex);
+		
+		redirect(index, result);
+		
+		return result;
 	}
 	
 	public void clear()
 	{
-		this.head = new RegionNode(this.initCapacity);
-		this.tail = null;
+		this.capacity = 0;
+		this.tail = this.head = new RegionNode(this.initCapacity);
 		this.size = 0;
 	}
 	
-	class RegionNode extends LinkedNode<T>
+	class RegionNode extends LinkedNode
 	{
 		RegionNode()
 		{
@@ -223,9 +259,18 @@ public class LinkedRegionList<T> {
 		}
 		
 		@Override
-		public int size()
+		public int capacity()
 		{
 			return end - start + 1;
+		}
+		
+		@Override
+		public int size()
+		{
+			checkFilled();
+			if((metacode & METACODE_SIGNAL_FILLED) != 0)
+				return capacity();
+			return size;
 		}
 		
 		@Override
@@ -243,12 +288,13 @@ public class LinkedRegionList<T> {
 		void append(T element)
 		{
 			ref[start + ptr++] = element;
+			size++;
 			checkFilled();
 		}
 		
 		void checkFilled()
 		{
-			if(!(ptr < size()))
+			if(!(size < capacity()))
 				metacode |= METACODE_SIGNAL_FILLED;
 		}
 		
@@ -265,10 +311,12 @@ public class LinkedRegionList<T> {
 		
 		int ptr;
 		
+		int size;
+		
 		Object[] ref;
 	}
 	
-	class SingleNode extends LinkedNode<T>
+	class SingleNode extends LinkedNode
 	{
 		SingleNode()
 		{
@@ -294,33 +342,97 @@ public class LinkedRegionList<T> {
 	
 	class LocatingResult
 	{
-		LocatingResult(LinkedNode<T> result, int base)
+		LocatingResult(LinkedNode result, int base, int nodeIndex)
 		{
 			this.result = result;
 			this.base = base;
+			this.nodeIndex = nodeIndex;
 		}
 		
-		LinkedNode<T> result;
+		LinkedNode result;
 		
 		int base;
+		
+		int nodeIndex;
 	}
 	
 	class FracturingResult
 	{
-		FracturingResult(LinkedNode<T> first, LinkedNode<T> second)
+		FracturingResult(LinkedNode first, LinkedNode second)
 		{
 			this.first = first;
 			this.second = second;
 		}
 		
-		LinkedNode<T> first;
+		LinkedNode first;
 		
-		LinkedNode<T> second;
+		LinkedNode second;
 	}
 	
-	LinkedNode<T> head;
+	abstract class LinkedNode implements Sized, MetaCode {
+		public void remove()
+		{
+			if(prev == null)
+				LinkedRegionList.this.head = next;
+			else
+			{
+				prev.next = next;
+				prev = null;
+			}
+			
+			if(next == null)
+				LinkedRegionList.this.tail = prev;
+			else
+			{
+				next.prev = prev;
+				next = null;
+			}
+		}
+		
+		public void linkBefore(LinkedNode node)
+		{
+			LinkedNode prev = node.prev;
+			node.prev = this;
+			if(prev != null)
+				prev.next = this;
+			this.next = node;
+			this.prev = prev;
+			if(prev == null)
+				LinkedRegionList.this.head = this;
+		}
+		
+		public void linkAfter(LinkedNode node)
+		{
+			LinkedNode next = node.next;
+			node.next = this;
+			if(next != null)
+				next.prev = this;
+			this.prev = node;
+			this.next = next;
+			if(next == null)
+				LinkedRegionList.this.tail = this;
+		}
+		
+		public abstract T get(int index);
+		
+		public int size()
+		{
+			return 1;
+		}
+		
+		public int capacity()
+		{
+			return 1;
+		}
+		
+		protected LinkedNode prev;
+		
+		protected LinkedNode next;
+	}
 	
-	LinkedNode<T> tail;
+	LinkedNode head;
+	
+	LinkedNode tail;
 	
 	private int size;
 	
@@ -332,6 +444,8 @@ public class LinkedRegionList<T> {
 	
 	private static final int DEFAULT_CAPACITY = 10;
 	
+	private static final double GROWTH_LOG_CONSTANT = Math.log(3D / 2D);
+	
 	// metacode type
 	static final int METACODE_TYPE_REGION = 0x00000000;
 	
@@ -342,14 +456,8 @@ public class LinkedRegionList<T> {
 	// metacode signal
 	static final int METACODE_SIGNAL_FILLED = 0x00000010;
 	
-	static final int METACODE_SIGNAL_MARKED_AS_MEGRING_ROOT = 0x00000100;
-	
-	static final int METACODE_SIGNAL_CONNECTED_TO_MEGRING_ROOT = 0x00000200;
-	
 	static final int METACODE_MASK_SIGNAL = 0x00000FF0;
 	
 	// options
 	public static final int OPTION_STATIC_GROWTH = 0x00000010;
-	
-	public static final int OPTION_TIRM_ON_REMOVE = 0x00000001;
 }
