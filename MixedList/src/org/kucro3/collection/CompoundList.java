@@ -40,6 +40,12 @@ public class CompoundList<E> {
 		return true;
 	}
 	
+	public boolean add(int index, E element)
+	{
+		insert(index, element);
+		return true;
+	}
+	
 	public E get(int index)
 	{
 		return elementAt(index);
@@ -48,6 +54,17 @@ public class CompoundList<E> {
 	public E remove(int index)
 	{
 		return drop(locate(index));
+	}
+	
+	void insert(int index, E element)
+	{
+		Fracture fracture = fracture(locate(index));
+		Element e = new Element();
+		
+		e.element = element;
+		e.linkBefore(fracture.right);
+		
+		size++;
 	}
 	
 	void append(E element)
@@ -62,6 +79,48 @@ public class CompoundList<E> {
 		window.size++;
 		
 		this.size++;
+	}
+	
+	int expected(int nodeIndex)
+	{
+		if(nodeIndex < initCapacity)
+			return 0;
+		return (int) Math.ceil(Math.log((double)(nodeIndex + 1) / (double)(initCapacity)) / GROWTH_LOG_CONSTANT);
+	}
+	
+	Location redirect(Location location)
+	{
+		int expected = expected(location.rawIndex);
+		if(expected == 0)
+			return location;
+		
+		int current = location.nodeIndex;
+		
+		if(current > (expected << 6)) // merge
+		{
+			int ptr = location.elementShift - 1;
+			Object[] newBase = new Object[location.elementShift];
+			Window window = new Window();
+			Node operating = location.located.prev;
+			
+			do for(int i = 0; i < operating.size(); i++)
+					newBase[ptr--] = operating.get(operating.size() - i - 1);
+			while((operating = operating.prev) != null);
+			
+			location.located.prev.next = null;
+			location.located.prev = null;
+			
+			window.base = newBase;
+//			window.start = 0;
+			window.end = newBase.length - 1;
+			window.size = newBase.length;
+			
+			window.linkBefore(location.located);
+			
+			location.nodeIndex = 1;
+		}
+		
+		return location;
 	}
 	
 	Window grow()
@@ -82,7 +141,40 @@ public class CompoundList<E> {
 	
 	Fracture fracture(Location location)
 	{
-		// TODO
+		if(location.elementIndex == 0)
+			return new Fracture(location.located, location.located);
+		else if(location.elementIndex + 1 == location.located.size())
+		{
+			Window window = (Window) location.located;
+			Element next = new Element();
+			
+			next.element = location.element();
+			
+			window.end--;
+			window.size--;
+			
+			next.linkAfter(window);
+			
+			return new Fracture(window, next);
+		}
+		else
+		{
+			Window window = (Window) location.located;
+			Window next = new Window();
+			
+			next.base = window.base;
+			next.start = window.start + location.elementIndex;
+			next.end = window.end;
+			next.size = window.size - location.elementIndex;
+			next.ptr = window.ptr;
+			
+			window.end = next.start - 1;
+			window.size = window.size - next.size;
+			
+			next.linkAfter(window);
+			
+			return new Fracture(window, next);
+		}
 	}
 	
 	E drop(Location location)
@@ -97,7 +189,6 @@ public class CompoundList<E> {
 		}
 		else
 		{
-			index = index - location.elementShift;
 			old = node.get(index);
 			
 			Window window = (Window) node;
@@ -123,7 +214,7 @@ public class CompoundList<E> {
 				next.end = window.end;
 				next.size = window.size - index - 1;
 				
-				window.end = window.start - index - 1;
+				window.end = window.start + index - 1;
 				window.size = window.size - next.size - 1;
 				
 				next.linkAfter(window);
@@ -153,14 +244,14 @@ public class CompoundList<E> {
 		int elementShift = 0, nodeIndex = 0;
 		Node node = head;
 		
-		while((node.size() + elementShift) < index)
+		while(!((node.size() + elementShift) > index))
 		{
 			elementShift += node.size();
 			nodeIndex++;
 			node = node.next;
 		}
 		
-		return new Location(elementShift, index - elementShift, nodeIndex, node);
+		return redirect(new Location(elementShift, index, index - elementShift, nodeIndex, node));
 	}
 	
 	final int initCapacity;
@@ -196,13 +287,13 @@ public class CompoundList<E> {
 		@Override
 		public E get(int index)
 		{
-			return (E) base[index];
+			return (E) base[start + index];
 		}
 		
 		@Override
 		public void set(int index, E element)
 		{
-			base[index] = element;
+			base[start + index] = element;
 		}
 		
 		@Override
@@ -274,10 +365,13 @@ public class CompoundList<E> {
 	{
 		public void remove()
 		{
+			Node next = this.next;
+			Node prev = this.prev;
+			
 			if(next != null)
 			{
 				next.prev = prev;
-				next = null;
+				this.next = null;
 			}
 			else
 				tail = prev;
@@ -285,7 +379,7 @@ public class CompoundList<E> {
 			if(prev != null)
 			{
 				prev.next = next;
-				prev = null;
+				this.prev = null;
 			}
 			else
 				head = next;
@@ -332,9 +426,10 @@ public class CompoundList<E> {
 	
 	class Location
 	{
-		Location(int shift, int index, int nodeIndex, Node located)
+		Location(int shift, int rawIndex, int elementIndex, int nodeIndex, Node located)
 		{
-			this.elementIndex = index;
+			this.rawIndex = rawIndex;
+			this.elementIndex = elementIndex;
 			this.elementShift = shift;
 			this.nodeIndex = nodeIndex;
 			this.located = located;
@@ -356,21 +451,25 @@ public class CompoundList<E> {
 		
 		int nodeIndex;
 		
+		int rawIndex;
+		
 		Node located;
 	}
 	
 	class Fracture
 	{
-		Fracture(Window left, Window right)
+		Fracture(Node left, Node right)
 		{
 			this.left = left;
 			this.right = right;
 		}
 		
-		Window left;
+		Node left;
 		
-		Window right;
+		Node right;
 	}
 	
 	public static final int DEFAULT_CAPACITY = 10;
+	
+	private static final double GROWTH_LOG_CONSTANT = Math.log(3D / 2D);
 }
