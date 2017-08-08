@@ -1,11 +1,9 @@
 package org.kucro3.collection;
 
-import java.util.AbstractList;
-import java.util.List;
 import java.util.NoSuchElementException;
 
 @SuppressWarnings("unchecked")
-public class CompoundList<E> extends AbstractList<E> implements List<E> {
+public class CompoundList<E> {
 	public CompoundList()
 	{
 		this(DEFAULT_CAPACITY);
@@ -26,38 +24,33 @@ public class CompoundList<E> extends AbstractList<E> implements List<E> {
 		this.head = this.tail = init;
 	}
 	
-	@Override
 	public int size()
 	{
 		return size;
 	}
 	
-	@Override
 	public boolean isEmpty()
 	{
 		return size == 0;
 	}
 	
-	@Override
 	public boolean add(E element)
 	{
 		append(element);
 		return true;
 	}
 	
-	@Override
-	public void add(int index, E element)
+	public boolean add(int index, E element)
 	{
 		insert(index, element);
+		return true;
 	}
 	
-	@Override
 	public E get(int index)
 	{
 		return elementAt(index);
 	}
 	
-	@Override
 	public E remove(int index)
 	{
 		return drop(locate(index));
